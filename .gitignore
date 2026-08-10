@@ -1,0 +1,23 @@
+Data/*
+!Data/.gitkeep
+
+# Python / virtualenv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+
+
+claude/
+CLAUDE.md
