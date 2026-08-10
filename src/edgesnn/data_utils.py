@@ -24,7 +24,7 @@ import pandas as pd
 # official UEA/UCR archive. `ensure_dataset` fetches + extracts them into
 # `data_dir`, and `load_ucr_data` calls it automatically, so a fresh clone works
 # without any manual data setup.
-UCR_EXTENSIONS = ('.txt', '.tsv', '.ts')
+UCR_EXTENSIONS = ('.txt', '.ts')
 
 DATASET_URLS = {
     "ECG5000": "https://www.timeseriesclassification.com/aeon-toolkit/ECG5000.zip",
@@ -56,9 +56,9 @@ def _resolve_split_paths(data_dir, dataset_name):
 def ensure_dataset(dataset_name, data_dir="Data", url=None):
     """Ensure a dataset's TRAIN/TEST files exist locally, downloading if needed.
 
-    If the files are already present in `data_dir`, does nothing. Otherwise
+    If the files are already present in `data_dir`, does nothing. Otherwise,
     downloads the official archive zip, extracts the `_TRAIN`/`_TEST` files (in
-    the formats our parser reads — `.txt`/`.tsv`/`.ts`, ignoring `.arff`), and
+    the formats our parser reads — `.txt`/`.ts`, ignoring `.arff`), and
     copies them into `data_dir`. Returns `(train_path, test_path)`.
     """
     train_path, test_path = _resolve_split_paths(data_dir, dataset_name)
@@ -101,10 +101,10 @@ def ensure_dataset(dataset_name, data_dir="Data", url=None):
         wanted = {f"{dataset_name}_TRAIN", f"{dataset_name}_TEST"}
         copied = 0
         for root, _dirs, files in os.walk(extract_dir):
-            for fname in files:
-                stem, ext = os.path.splitext(fname)
+            for filename in files:
+                stem, ext = os.path.splitext(filename)
                 if stem in wanted and ext in UCR_EXTENSIONS:
-                    shutil.copy(os.path.join(root, fname), os.path.join(data_dir, fname))
+                    shutil.copy(os.path.join(root, filename), os.path.join(data_dir, filename))
                     copied += 1
 
     train_path, test_path = _resolve_split_paths(data_dir, dataset_name)
