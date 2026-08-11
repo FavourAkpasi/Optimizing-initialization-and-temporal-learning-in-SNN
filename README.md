@@ -60,10 +60,12 @@ Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_
 
 ## Status
 
-- [x] Data loading + EDA (parsing, class-distribution and mean/std plots)
-- [x] Cheap initializers (Gaussian baseline, LCG, LFSR, Sobol, Halton)
-- [x] Spiking reservoir model (LIF + surrogate gradient + `k`-truncation)
-- [ ] Dataset class + DataLoaders (label encoding, normalization)
+- [x] Data loading + EDA (parsing, binary parse cache, class-distribution and mean/std plots)
+- [x] Cheap initializers (Gaussian baseline, LCG, LFSR, Sobol, Halton) with sparse
+      reservoir connectivity (`p_c`) and seeding
+- [x] Spiking reservoir model (LIF + surrogate gradient + `k`-truncation, spike-based
+      recurrence, structurally enforced sparsity)
+- [x] Dataset class + DataLoaders (label encoding, normalization)
 - [ ] Baselines: dense LSTM, random LSM
 - [ ] Truncated surrogate-gradient BPTT trainer
 - [ ] Evaluation metrics (Macro-F1, confusion matrix, latency, SOPs vs. MACs)
