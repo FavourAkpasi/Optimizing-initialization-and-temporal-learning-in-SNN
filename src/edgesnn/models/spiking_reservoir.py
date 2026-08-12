@@ -145,8 +145,15 @@ class TruncatedSpikingReservoir(nn.Module):
             "W_out": self.W_out.weight.numel(),
         }
 
-    def forward(self, x):
-        """
+    def reservoir_forward(self, x):
+        """Run the reservoir over the truncated window; return the spike count.
+
+        Split out of `forward` so a readout-only model (`models/lsm.py`) can
+        reuse this loop verbatim rather than reimplementing the dynamics. That
+        the LSM and the proposed model share one substrate is then true by
+        construction, which is what licenses attributing the difference between
+        them solely to whether the reservoir is trained.
+
         x shape: (batch_size, sequence_length, features)
         """
         batch_size, seq_len, _ = x.size()
@@ -168,7 +175,19 @@ class TruncatedSpikingReservoir(nn.Module):
             # Accumulate spikes for the readout layer (Rate Coding)
             spike_count += S_t
 
+        return spike_count
+
+    def forward(self, x):
+        """
+        x shape: (batch_size, sequence_length, features)
+        """
+        spike_count = self.reservoir_forward(x)
+
         # The final prediction is a linear mapping of the total spike counts
         logits = self.W_out(spike_count)
 
         return logits, spike_count
+
+    def trainable_parameters(self):
+        """Parameter count, for the capacity comparison against the baselines."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)

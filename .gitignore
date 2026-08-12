@@ -17,6 +17,7 @@ dist/
 
 # LaTeX
 reports/latex/
+out/
 
 # OS
 .DS_Store

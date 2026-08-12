@@ -2,9 +2,10 @@
 
     spiking_reservoir  Truncated spiking recurrent reservoir (LIF + surrogate grad).
     lstm               Dense LSTM baseline (parameter-matched to the reservoir).
-    lsm                Random Liquid State Machine baseline (to build).
+    lsm                Liquid State Machine baseline (same substrate, readout only).
 """
 
+from edgesnn.models.lsm import LiquidStateMachine
 from edgesnn.models.lstm import LSTMBaseline
 from edgesnn.models.spiking_reservoir import (
     FastSigmoidSurrogate,
@@ -17,4 +18,5 @@ __all__ = [
     "LIFCell",
     "TruncatedSpikingReservoir",
     "LSTMBaseline",
+    "LiquidStateMachine",
 ]

@@ -45,6 +45,7 @@ src/edgesnn/            installable package (editable via `uv sync`)
   models/
     spiking_reservoir.py  LIF neurons + surrogate gradient + k-truncation
     lstm.py               dense LSTM baseline
+    lsm.py                Liquid State Machine (frozen reservoir, trained readout)
 notebooks/              experiments (01-EDA, 02-temporal-analysis)
 Data/                   UCR datasets
 ```
@@ -72,7 +73,8 @@ Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_
       and sharing its truncation window
 - [x] Temporal analysis (`temporal_analysis.py`): per-timestep ANOVA separability
       and cross-validated prefix-classifier curves, computed on the training split
-- [ ] Random LSM baseline (`models/lsm.py`)
+- [x] Liquid State Machine baseline (`models/lsm.py`): the same spiking substrate
+      with a frozen reservoir and a trained linear readout
 - [ ] Truncated surrogate-gradient BPTT trainer
 - [ ] Evaluation metrics (Macro-F1, confusion matrix, latency, SOPs vs. MACs)
 - [ ] Experiment notebooks for the three staged comparisons
