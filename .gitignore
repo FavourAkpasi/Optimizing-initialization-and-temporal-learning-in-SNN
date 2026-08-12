@@ -15,6 +15,9 @@ dist/
 # IDE
 .idea/
 
+# LaTeX
+reports/latex/
+
 # OS
 .DS_Store
 

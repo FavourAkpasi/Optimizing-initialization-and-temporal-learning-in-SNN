@@ -184,3 +184,68 @@ def plot_mean_std_series(df, dataset_name, split_name="Train", save_path=None,
 
     plt.tight_layout()
     _finish(fig, save_path, show)
+
+
+def plot_separability(f_stats, dataset_name, k_marks=None, save_path=None, show=True):
+    """Plot the per-timestep ANOVA F-statistic from `temporal_analysis`.
+
+    `k_marks` (absolute timesteps) draws the truncation grid over the curve, so
+    the figure reads as "cutting at 20% of T discards this much of the
+    discriminative mass". Takes the plain `(T,)` array — the statistic is
+    computed in `temporal_analysis.py`, keeping analysis out of the plotter.
+    """
+    f_stats = np.asarray(f_stats, dtype=float)
+    time_steps = np.arange(len(f_stats))
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(time_steps, f_stats, color="darkred", linewidth=1.5)
+    ax.fill_between(time_steps, 0, f_stats, color="darkred", alpha=0.15)
+
+    for k in k_marks or []:
+        ax.axvline(k - 1, color="grey", linestyle="--", linewidth=1, alpha=0.8)
+        ax.text(k - 1, ax.get_ylim()[1], f" k={k}", va="top", ha="left",
+                fontsize=9, color="grey")
+
+    ax.set_title(f"Per-Timestep Class Separability: {dataset_name}",
+                 fontsize=14, fontweight="bold")
+    ax.set_xlabel("Time Step")
+    ax.set_ylabel("ANOVA F-statistic")
+    ax.set_xlim(0, len(f_stats) - 1)
+
+    plt.tight_layout()
+    _finish(fig, save_path, show)
+
+
+def plot_prefix_curve(curves, save_path=None, show=True, x="fraction"):
+    """Plot cross-validated prefix-classifier Macro-F1 against the cutoff `k`.
+
+    `curves` is either one `prefix_classifier_curve` DataFrame or a
+    `{dataset_name: DataFrame}` mapping, which puts all three datasets on one
+    axis — the comparison the truncation chapter actually argues from. Error
+    bands are ±1 std over the cross-validation folds. Use `x="fraction"` to
+    compare across datasets of differing T, `x="k"` for a single dataset.
+    """
+    if isinstance(curves, pd.DataFrame):
+        curves = {"": curves}
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    palette = sns.color_palette("viridis", max(len(curves), 2))
+
+    for colour, (name, curve) in zip(palette, curves.items()):
+        xs = curve[x].to_numpy()
+        mean = curve["macro_f1_mean"].to_numpy()
+        std = curve["macro_f1_std"].to_numpy()
+        ax.plot(xs, mean, marker="o", color=colour, linewidth=2, label=name or None)
+        ax.fill_between(xs, mean - std, mean + std, color=colour, alpha=0.2)
+
+    ax.set_title("Prefix-Classifier Performance vs. Truncation Point",
+                 fontsize=14, fontweight="bold")
+    ax.set_xlabel("Fraction of sequence observed" if x == "fraction" else "Truncation point k")
+    ax.set_ylabel("Macro-F1 (cross-validated, train split)")
+    if x == "fraction":
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
+    if any(curves):
+        ax.legend(title="Dataset")
+
+    plt.tight_layout()
+    _finish(fig, save_path, show)

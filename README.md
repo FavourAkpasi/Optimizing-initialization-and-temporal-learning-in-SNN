@@ -41,9 +41,11 @@ src/edgesnn/            installable package (editable via `uv sync`)
   data_utils.py         UCR parsing/loading (format-agnostic .txt/.tsv/.ts)
   plotting.py           EDA plots (operate on DataFrames)
   initializers.py       cheap PRNG/LDS weight initializers
+  temporal_analysis.py  per-timestep separability + prefix-classifier curves
   models/
     spiking_reservoir.py  LIF neurons + surrogate gradient + k-truncation
-notebooks/              experiments (currently: 01-EDA.ipynb)
+    lstm.py               dense LSTM baseline
+notebooks/              experiments (01-EDA, 02-temporal-analysis)
 Data/                   UCR datasets
 ```
 
@@ -66,7 +68,23 @@ Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_
 - [x] Spiking reservoir model (LIF + surrogate gradient + `k`-truncation, spike-based
       recurrence, structurally enforced sparsity)
 - [x] Dataset class + DataLoaders (label encoding, normalization)
-- [ ] Baselines: dense LSTM, random LSM
+- [x] Dense LSTM baseline (`models/lstm.py`), parameter-matched to the reservoir
+      and sharing its truncation window
+- [x] Temporal analysis (`temporal_analysis.py`): per-timestep ANOVA separability
+      and cross-validated prefix-classifier curves, computed on the training split
+- [ ] Random LSM baseline (`models/lsm.py`)
 - [ ] Truncated surrogate-gradient BPTT trainer
 - [ ] Evaluation metrics (Macro-F1, confusion matrix, latency, SOPs vs. MACs)
 - [ ] Experiment notebooks for the three staged comparisons
+
+### Model configuration
+
+The spiking reservoir uses `N_res = 256` neurons at a connection probability of
+`p_c = 0.1`, and the LSTM baseline uses a hidden size of `H = 128`. The pairing is
+chosen so the two models carry an equal trainable-parameter budget: an LSTM
+allocates four gate matrices per hidden unit, costing roughly `4H²` recurrent
+parameters against the reservoir's `N_res²`, so parity falls at `H ≈ N_res / 2`.
+Both land at ~66–68k parameters. Sparsity is deliberately excluded from that
+matching, so the efficiency benefit appears in the operation counts rather than
+in the choice of layer size. Both models are evaluated over the same truncation
+grid, `k ∈ {20, 40, 60, 80, 100}%` of sequence length.
