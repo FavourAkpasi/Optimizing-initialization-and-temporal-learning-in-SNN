@@ -40,9 +40,9 @@ from .spiking_reservoir import TruncatedSpikingReservoir
 class LiquidStateMachine(TruncatedSpikingReservoir):
     """Frozen spiking reservoir with a trained linear readout."""
 
-    def __init__(self, input_size, hidden_size, num_classes, truncation_k=40):
+    def __init__(self, input_size, hidden_size, num_classes, truncation_k=40, **neuron_kwargs):
         super().__init__(input_size, hidden_size, num_classes,
-                         truncation_k=truncation_k)
+                         truncation_k=truncation_k, **neuron_kwargs)
         self.freeze_reservoir()
 
     def freeze_reservoir(self):

@@ -1,47 +1,139 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# ---------------------------------------------------------------------------
+# Surrogate gradients
+#
+# Every one of these shares the SAME forward pass -- a hard Heaviside spike, so
+# the network's inference behaviour is bit-identical across families and the
+# choice affects learning only. They differ solely in the derivative substituted
+# for the step function's (zero almost everywhere, undefined at threshold)
+# during the backward pass.
+#
+# NOTE ON SCALE: at x = 0 the four families return 1, beta/2, 1 and beta/4
+# respectively, so at the default beta = 10 their gradient magnitudes differ by
+# up to 5x. The surrogate family therefore CANNOT be tuned independently of the
+# learning rate -- the two must be crossed in the grid, or a family will be
+# rejected for having the wrong gradient scale rather than the wrong shape.
+# ---------------------------------------------------------------------------
+
 
 class FastSigmoidSurrogate(torch.autograd.Function):
-    """
-    Custom autograd function to solve the non-differentiable Heaviside step function.
-    Forward pass: Hard step function (Spike emission).
-    Backward pass: Derivative of a fast sigmoid (Surrogate gradient).
-    """
+    """Fast-sigmoid surrogate: `1 / (1 + beta|x|)^2`. The project default."""
 
     @staticmethod
-    def forward(ctx, membrane_potential, threshold):
-        # Save potential for the backward pass
+    def forward(ctx, membrane_potential, threshold, beta):
         ctx.save_for_backward(membrane_potential)
         ctx.threshold = threshold
+        ctx.beta = beta
 
         # Heaviside Step Function: Emit 1.0 if potential >= threshold, else 0.0
-        spike = (membrane_potential >= threshold).float()
-        return spike
+        return (membrane_potential >= threshold).float()
 
     @staticmethod
     def backward(ctx, grad_output):
         membrane_potential, = ctx.saved_tensors
-        threshold = ctx.threshold
+        x = membrane_potential - ctx.threshold
+        grad = 1.0 / (1.0 + ctx.beta * torch.abs(x)) ** 2
+        return grad_output * grad, None, None
 
-        # Fast Sigmoid derivative parameters (beta determines steepness)
-        beta = 10.0
 
-        # Surrogate gradient calculation: f'(x) = 1 / (1 + |beta * x|)^2
-        grad = 1.0 / (1.0 + beta * torch.abs(membrane_potential - threshold)) ** 2
+class ArcTanSurrogate(torch.autograd.Function):
+    """Arctangent surrogate: `beta / (2 (1 + (pi beta x / 2)^2))`.
 
-        # Chain rule
-        return grad_output * grad, None
+    Heavier tails than the fast sigmoid, so neurons far from threshold keep
+    receiving a gradient instead of being effectively frozen out.
+    """
+
+    @staticmethod
+    def forward(ctx, membrane_potential, threshold, beta):
+        ctx.save_for_backward(membrane_potential)
+        ctx.threshold = threshold
+        ctx.beta = beta
+        return (membrane_potential >= threshold).float()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        membrane_potential, = ctx.saved_tensors
+        x = membrane_potential - ctx.threshold
+        grad = ctx.beta / (2.0 * (1.0 + (math.pi / 2.0 * ctx.beta * x) ** 2))
+        return grad_output * grad, None, None
+
+
+class TriangularSurrogate(torch.autograd.Function):
+    """Piecewise-linear surrogate: `max(0, 1 - beta|x|)`.
+
+    The cheapest of the four on hardware -- a comparison and a subtraction, no
+    division or transcendental -- and the only one with compact support, so
+    neurons outside the window receive exactly zero gradient. That makes it the
+    most interesting family for this thesis: if it matches the others, the
+    backward pass is as amenable to cheap arithmetic as the forward pass.
+    """
+
+    @staticmethod
+    def forward(ctx, membrane_potential, threshold, beta):
+        ctx.save_for_backward(membrane_potential)
+        ctx.threshold = threshold
+        ctx.beta = beta
+        return (membrane_potential >= threshold).float()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        membrane_potential, = ctx.saved_tensors
+        x = membrane_potential - ctx.threshold
+        grad = torch.clamp(1.0 - ctx.beta * torch.abs(x), min=0.0)
+        return grad_output * grad, None, None
+
+
+class SigmoidSurrogate(torch.autograd.Function):
+    """Logistic-derivative surrogate: `beta * s(1-s)` with `s = sigmoid(beta x)`."""
+
+    @staticmethod
+    def forward(ctx, membrane_potential, threshold, beta):
+        ctx.save_for_backward(membrane_potential)
+        ctx.threshold = threshold
+        ctx.beta = beta
+        return (membrane_potential >= threshold).float()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        membrane_potential, = ctx.saved_tensors
+        s = torch.sigmoid(ctx.beta * (membrane_potential - ctx.threshold))
+        grad = ctx.beta * s * (1.0 - s)
+        return grad_output * grad, None, None
+
+
+SURROGATES = {
+    "fast_sigmoid": FastSigmoidSurrogate,
+    "arctan": ArcTanSurrogate,
+    "triangular": TriangularSurrogate,
+    "sigmoid": SigmoidSurrogate,
+}
+
+
+def get_surrogate(name):
+    """Look up a surrogate family by name, failing loudly on a typo."""
+    try:
+        return SURROGATES[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown surrogate {name!r}; expected one of {sorted(SURROGATES)}."
+        ) from None
 
 
 class LIFCell(nn.Module):
-    def __init__(self, input_size, hidden_size, leak_rate=0.9, threshold=1.0, reset_potential=0.0):
+    def __init__(self, input_size, hidden_size, leak_rate=0.9, threshold=1.0,
+                 reset_potential=0.0, surrogate="fast_sigmoid", surrogate_beta=10.0):
         super(LIFCell, self).__init__()
         self.hidden_size = hidden_size
         self.leak_rate = leak_rate
         self.threshold = threshold
         self.reset_potential = reset_potential
+        self.surrogate_name = surrogate
+        self.surrogate_beta = surrogate_beta
 
         # Trainable Recurrent Weights (Will be initialized via custom methods)
         self.W_res = nn.Linear(hidden_size, hidden_size, bias=False)
@@ -52,7 +144,7 @@ class LIFCell(nn.Module):
         # is never updated by the optimizer. `None` means a dense reservoir.
         self.register_buffer("res_mask", None)
 
-        self.surrogate_spike = FastSigmoidSurrogate.apply
+        self.surrogate_spike = get_surrogate(surrogate).apply
 
     def set_sparsity_mask(self, mask):
         """Fix which recurrent synapses exist, for the lifetime of the model."""
@@ -94,7 +186,7 @@ class LIFCell(nn.Module):
         H_t = (V_prev - self.reset_potential) * self.leak_rate + I_t
 
         # 3. Fire: Check if potential exceeds threshold
-        S_t = self.surrogate_spike(H_t, self.threshold)
+        S_t = self.surrogate_spike(H_t, self.threshold, self.surrogate_beta)
 
         # 4. Reset: Reset-by-subtraction mechanism
         # If a spike occurs (S_t=1), subtract the threshold from the potential
@@ -104,9 +196,17 @@ class LIFCell(nn.Module):
 
 
 class TruncatedSpikingReservoir(nn.Module):
-    def __init__(self, input_size, hidden_size, num_classes, truncation_k=40):
+    def __init__(self, input_size, hidden_size, num_classes, truncation_k=40,
+                 leak_rate=0.9, threshold=1.0, reset_potential=0.0,
+                 surrogate="fast_sigmoid", surrogate_beta=10.0):
         """
         A full Spiking Recurrent Network with an explicit truncation window k.
+
+        The neuron and surrogate hyperparameters are constructor arguments rather
+        than constants so the tuning grid can reach them. They are nuisance
+        parameters: selected once per model on the validation split at k = T, then
+        frozen across the truncation and initialization sweeps. Re-tuning them at
+        each k would mix tuning effects into the accuracy-versus-k curve.
         """
         super(TruncatedSpikingReservoir, self).__init__()
         self.hidden_size = hidden_size
@@ -114,7 +214,9 @@ class TruncatedSpikingReservoir(nn.Module):
         self.k = truncation_k
 
         # The Spiking Reservoir
-        self.lif_layer = LIFCell(input_size, hidden_size)
+        self.lif_layer = LIFCell(input_size, hidden_size, leak_rate=leak_rate,
+                                 threshold=threshold, reset_potential=reset_potential,
+                                 surrogate=surrogate, surrogate_beta=surrogate_beta)
 
         # The Trainable Readout Layer
         self.W_out = nn.Linear(hidden_size, num_classes)

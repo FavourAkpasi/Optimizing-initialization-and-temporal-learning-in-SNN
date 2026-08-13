@@ -42,6 +42,8 @@ src/edgesnn/            installable package (editable via `uv sync`)
   plotting.py           EDA plots (operate on DataFrames)
   initializers.py       cheap PRNG/LDS weight initializers
   temporal_analysis.py  per-timestep separability + prefix-classifier curves
+  training.py           shared truncated-BPTT trainer (weighted loss, early stop)
+  tuning.py             hyperparameter search (exhaustive and staged)
   models/
     spiking_reservoir.py  LIF neurons + surrogate gradient + k-truncation
     lstm.py               dense LSTM baseline
@@ -75,8 +77,13 @@ Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_
       and cross-validated prefix-classifier curves, computed on the training split
 - [x] Liquid State Machine baseline (`models/lsm.py`): the same spiking substrate
       with a frozen reservoir and a trained linear readout
-- [ ] Truncated surrogate-gradient BPTT trainer
-- [ ] Evaluation metrics (Macro-F1, confusion matrix, latency, SOPs vs. MACs)
+- [x] Truncated surrogate-gradient BPTT trainer (`training.py`) shared by all three
+      models, with class-weighted loss, a stratified validation split and early
+      stopping on Macro-F1
+- [x] Exhaustive hyperparameter search (`tuning.py`) over learning rate, four
+      surrogate-gradient families and the neuron parameters, selected by
+      cross-validation on the training split
+- [ ] Evaluation metrics (confusion matrix, latency, SOPs vs. MACs energy)
 - [ ] Experiment notebooks for the three staged comparisons
 
 ### Model configuration
