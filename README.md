@@ -49,8 +49,11 @@ src/edgesnn/            installable package (editable via `uv sync`)
     spiking_reservoir.py  LIF neurons + surrogate gradient + k-truncation
     lstm.py               dense LSTM baseline
     lsm.py                Liquid State Machine (frozen reservoir, trained readout)
-notebooks/              experiments (01-EDA, 02-temporal-analysis)
+  experiments.py        model factory, run bookkeeping, resumable result store
+notebooks/              01-EDA, 02-temporal-analysis, 03-baselines,
+                        04-initialization-study, 05-truncation-study
 scripts/                figure generation (e.g. LIF neuron dynamics)
+results/                run outputs (CSV/JSON)
 Data/                   UCR datasets
 ```
 
@@ -87,7 +90,25 @@ Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_
       cross-validation on the training split
 - [x] Evaluation metrics (`evaluation_metrics.py`): Macro-F1, confusion matrices,
       algorithmic latency, and SOPs-vs-MACs energy under the Horowitz model
-- [ ] Experiment notebooks for the three staged comparisons
+- [x] Experiment notebooks for the three staged comparisons (`03-baselines`,
+      `04-initialization-study`, `05-truncation-study`), resumable across restarts
+
+### Reproducing the results
+
+Run the notebooks in order; each writes to `results/` and skips work already done,
+so an interrupted sweep resumes rather than restarting.
+
+```bash
+uv run jupyter lab
+# 01-EDA                  dataset figures and Table 3.1
+# 02-temporal-analysis    per-timestep separability, prefix-classifier curves
+# 03-baselines            hyperparameter search  -> results/config_*.json
+# 04-initialization-study Stage 1: the five initializers on a frozen reservoir
+# 05-truncation-study     Stages 2 and 3: the k sweep, energy and latency
+```
+
+Notebook 03 must run first: it selects the configurations that 04 and 05 reuse
+unchanged. Both raise a clear error if those configurations are missing.
 
 ### Model configuration
 

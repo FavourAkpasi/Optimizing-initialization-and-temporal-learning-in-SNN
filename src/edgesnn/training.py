@@ -218,7 +218,7 @@ def train_model(model, train_dataset, *, batch_size=64, lr=1e-3, max_epochs=60,
     best_state, epochs_since_best = None, 0
 
     epoch_bar = tqdm(range(max_epochs), desc=desc or "training", unit="ep",
-                     disable=not progress, leave=True)
+                     disable=not progress, leave=False)
 
     for epoch in epoch_bar:
         model.train()

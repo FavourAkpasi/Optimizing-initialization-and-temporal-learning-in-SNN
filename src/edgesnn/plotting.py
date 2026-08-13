@@ -336,36 +336,51 @@ def plot_separability(f_stats, dataset_name, k_marks=None, save_path=None, show=
     _finish(fig, save_path, show)
 
 
-def plot_prefix_curve(curves, save_path=None, show=True, x="fraction"):
-    """Plot cross-validated prefix-classifier Macro-F1 against the cutoff `k`.
+def plot_prefix_curve(curves, save_path=None, show=True, x="fraction",
+                      value="macro_f1_mean", spread="macro_f1_std", title=None,
+                      ylabel=None, legend_title="Dataset", ax=None):
+    """Plot a metric against the truncation point, with a ±1 spread band.
 
-    `curves` is either one `prefix_classifier_curve` DataFrame or a
-    `{dataset_name: DataFrame}` mapping, which puts all three datasets on one
-    axis — the comparison the truncation chapter actually argues from. Error
-    bands are ±1 std over the cross-validation folds. Use `x="fraction"` to
-    compare across datasets of differing T, `x="k"` for a single dataset.
+    `curves` is one DataFrame or a `{label: DataFrame}` mapping. It serves both
+    the prefix-classifier curves of the temporal analysis and the
+    accuracy-versus-`k` curves of the truncation study, because those two are
+    meant to be read against each other — the point of the comparison is whether
+    a model's curve sits above the model-free probe at the same cutoff. Passing
+    an existing `ax` overlays them on one axis.
+
+    Use `x="fraction"` to compare across datasets of differing `T`, `x="k"` for
+    a single dataset.
     """
     if isinstance(curves, pd.DataFrame):
         curves = {"": curves}
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    own_figure = ax is None
+    if own_figure:
+        fig, ax = plt.subplots(figsize=(8, 5))
+    else:
+        fig = ax.get_figure()
+
     palette = sns.color_palette("viridis", max(len(curves), 2))
 
     for colour, (name, curve) in zip(palette, curves.items()):
+        curve = curve.sort_values(x)
         xs = curve[x].to_numpy()
-        mean = curve["macro_f1_mean"].to_numpy()
-        std = curve["macro_f1_std"].to_numpy()
+        mean = curve[value].to_numpy()
         ax.plot(xs, mean, marker="o", color=colour, linewidth=2, label=name or None)
-        ax.fill_between(xs, mean - std, mean + std, color=colour, alpha=0.2)
+        if spread and spread in curve:
+            band = curve[spread].fillna(0).to_numpy()
+            ax.fill_between(xs, mean - band, mean + band, color=colour, alpha=0.2)
 
-    ax.set_title("Prefix-Classifier Performance vs. Truncation Point",
+    ax.set_title(title or "Prefix-Classifier Performance vs. Truncation Point",
                  fontsize=14, fontweight="bold")
-    ax.set_xlabel("Fraction of sequence observed" if x == "fraction" else "Truncation point k")
-    ax.set_ylabel("Macro-F1 (cross-validated, train split)")
+    ax.set_xlabel("Fraction of sequence observed" if x == "fraction" else "Truncation point $k$")
+    ax.set_ylabel(ylabel or "Macro-F1 (cross-validated, train split)")
     if x == "fraction":
         ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
     if any(curves):
-        ax.legend(title="Dataset")
+        ax.legend(title=legend_title)
 
-    plt.tight_layout()
-    _finish(fig, save_path, show)
+    if own_figure:
+        plt.tight_layout()
+        _finish(fig, save_path, show)
+    return ax
