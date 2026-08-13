@@ -44,11 +44,13 @@ src/edgesnn/            installable package (editable via `uv sync`)
   temporal_analysis.py  per-timestep separability + prefix-classifier curves
   training.py           shared truncated-BPTT trainer (weighted loss, early stop)
   tuning.py             hyperparameter search (exhaustive and staged)
+  evaluation_metrics.py Macro-F1, confusion matrices, latency, SOPs/MACs energy
   models/
     spiking_reservoir.py  LIF neurons + surrogate gradient + k-truncation
     lstm.py               dense LSTM baseline
     lsm.py                Liquid State Machine (frozen reservoir, trained readout)
 notebooks/              experiments (01-EDA, 02-temporal-analysis)
+scripts/                figure generation (e.g. LIF neuron dynamics)
 Data/                   UCR datasets
 ```
 
@@ -83,7 +85,8 @@ Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_
 - [x] Exhaustive hyperparameter search (`tuning.py`) over learning rate, four
       surrogate-gradient families and the neuron parameters, selected by
       cross-validation on the training split
-- [ ] Evaluation metrics (confusion matrix, latency, SOPs vs. MACs energy)
+- [x] Evaluation metrics (`evaluation_metrics.py`): Macro-F1, confusion matrices,
+      algorithmic latency, and SOPs-vs-MACs energy under the Horowitz model
 - [ ] Experiment notebooks for the three staged comparisons
 
 ### Model configuration

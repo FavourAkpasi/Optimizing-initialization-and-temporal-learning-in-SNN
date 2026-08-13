@@ -186,6 +186,126 @@ def plot_mean_std_series(df, dataset_name, split_name="Train", save_path=None,
     _finish(fig, save_path, show)
 
 
+def plot_lif_dynamics(potential, spikes, current, threshold=1.0, reset_potential=0.0,
+                      leak_rate=0.9, save_path=None, show=True):
+    """Illustrate one LIF neuron's membrane trace, for the background chapter.
+
+    Takes plain arrays rather than a model, so this module stays free of
+    modeling imports; `scripts/make_lif_figure.py` runs the real `LIFCell` and
+    passes its output here, which is what keeps the figure honest — it shows the
+    dynamics the experiments actually use rather than a redrawn idealisation.
+
+    The annotation that matters is the reset: the trace drops by exactly one
+    threshold and keeps whatever charge lay above it, so a neuron driven well
+    past threshold starts the next step already part-way back.
+    """
+    potential = np.asarray(potential, dtype=float)
+    spikes = np.asarray(spikes, dtype=float)
+    current = np.asarray(current, dtype=float)
+    steps = np.arange(len(potential))
+
+    # `potential` is V[t], recorded AFTER the reset, so on its own it never
+    # reaches the threshold and the figure would appear to show a neuron that
+    # fires without ever arriving. The pre-reset value is recovered exactly from
+    # V[t] = H[t] - threshold * S[t], and a spiking step is drawn as two points
+    # at the same t, giving the vertical drop that the subtraction performs.
+    pre_reset = potential + threshold * spikes
+    xs, ys = [], []
+    for t in steps:
+        if spikes[t] > 0:
+            xs.extend([t, t])
+            ys.extend([pre_reset[t], potential[t]])
+        else:
+            xs.append(t)
+            ys.append(potential[t])
+
+    fig, (ax_i, ax_v) = plt.subplots(
+        2, 1, figsize=(10, 5.5), sharex=True,
+        gridspec_kw={"height_ratios": [1, 3], "hspace": 0.12})
+
+    ax_i.bar(steps, current, width=0.35, color="steelblue")
+    ax_i.set_ylabel("Input\n$X[t]$")
+    ax_i.grid(axis="y", alpha=0.3)
+
+    ax_v.plot(xs, ys, color="black", linewidth=2, marker="o", markersize=3.5,
+              label="Membrane potential")
+    ax_v.axhline(threshold, color="green", linestyle="--", linewidth=1.5,
+                 label=r"Threshold $\vartheta$")
+    ax_v.axhline(reset_potential, color="firebrick", linestyle=":", linewidth=1.5,
+                 label="$V_{reset}$")
+
+    fired = steps[spikes > 0]
+    for t in fired:
+        ax_v.plot([t], [pre_reset[t]], marker="*", color="darkorange",
+                  markersize=15, zorder=5)
+        # The retained charge: from V_reset up to the post-reset potential.
+        ax_v.annotate("", xy=(t + 0.42, potential[t]), xytext=(t + 0.42, reset_potential),
+                      arrowprops=dict(arrowstyle="<->", color="darkorange", lw=1.4))
+
+    if len(fired):
+        ax_v.plot([], [], marker="*", color="darkorange", linestyle="none",
+                  markersize=13, label=r"Spike emitted ($H[t] \geq \vartheta$)")
+        t0 = fired[-1]
+        ax_v.annotate(
+            "residual $H[t]-\\vartheta$ is\ncarried into the next step",
+            xy=(t0 + 0.42, potential[t0] / 2), xytext=(t0 + 1.1, threshold * 0.72),
+            fontsize=9, color="darkorange",
+            arrowprops=dict(arrowstyle="->", color="darkorange", lw=1.2))
+
+    ax_v.set_xlabel("Time step $t$")
+    ax_v.set_ylabel("Membrane potential")
+    ax_v.set_xticks(steps[::2])          # timesteps are integers, not 2.5, 7.5, ...
+    ax_v.set_ylim(-0.08, max(pre_reset.max(), threshold) * 1.28)
+    ax_v.grid(alpha=0.3)
+    ax_v.legend(loc="upper left", fontsize=9, framealpha=0.95)
+
+    equations = (r"LIF dynamics:  $H[t]=\beta(V[t-1]-V_{reset})+X[t]$,   "
+                 r"$S[t]=\Theta(H[t]-\vartheta)$,   "
+                 r"$V[t]=H[t]-\vartheta\,S[t]$")
+    ax_i.set_title(equations + "\n"
+                   + rf"($\beta={leak_rate}$, $\vartheta={threshold}$)",
+                   fontsize=11, fontweight="bold")
+
+    _finish(fig, save_path, show)
+
+
+def plot_confusion_matrix(matrix, class_names=None, title=None, normalize=True,
+                          save_path=None, show=True):
+    """Confusion matrix heatmap, as promised by Methods Section 3.7.1.
+
+    Row-normalised by default, which is the reading that matters under class
+    imbalance: with 665 faults against 5,499 normals, raw counts make the
+    minority row almost invisible, while row fractions show what proportion of
+    each true class was recovered. Raw counts are annotated underneath so
+    nothing is hidden by the normalisation.
+    """
+    matrix = np.asarray(matrix)
+    n = matrix.shape[0]
+    names = list(class_names) if class_names is not None else [str(i) for i in range(n)]
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        shown = matrix / matrix.sum(axis=1, keepdims=True) if normalize else matrix
+    shown = np.nan_to_num(shown)
+
+    annotations = np.empty(matrix.shape, dtype=object)
+    for i in range(n):
+        for j in range(n):
+            annotations[i, j] = (f"{shown[i, j]:.2f}\n({matrix[i, j]:,})"
+                                 if normalize else f"{matrix[i, j]:,}")
+
+    fig, ax = plt.subplots(figsize=(1.5 + 1.1 * n, 1.2 + 0.95 * n))
+    sns.heatmap(shown, annot=annotations, fmt="", cmap="Blues", square=True,
+                cbar_kws={"label": "fraction of true class" if normalize else "count"},
+                xticklabels=names, yticklabels=names, ax=ax,
+                vmin=0, vmax=1 if normalize else None, annot_kws={"fontsize": 9})
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("True")
+    ax.set_title(title or "Confusion matrix", fontsize=13, fontweight="bold")
+
+    plt.tight_layout()
+    _finish(fig, save_path, show)
+
+
 def plot_separability(f_stats, dataset_name, k_marks=None, save_path=None, show=True):
     """Plot the per-timestep ANOVA F-statistic from `temporal_analysis`.
 
