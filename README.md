@@ -92,6 +92,9 @@ Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_
       algorithmic latency, and SOPs-vs-MACs energy under the Horowitz model
 - [x] Experiment notebooks for the three staged comparisons (`03-baselines`,
       `04-initialization-study`, `05-truncation-study`), resumable across restarts
+- [ ] Low-discrepancy initializers currently fill the recurrent matrix from a
+      one-dimensional sequence, which makes it rank-deficient; they are being
+      reworked to the s-dimensional construction before their results are used
 
 ### Reproducing the results
 
