@@ -1,0 +1,6 @@
+{
+  "leak_rate": 0.95,
+  "threshold": 0.5,
+  "surrogate": "arctan",
+  "lr": 0.003
+}

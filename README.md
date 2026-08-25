@@ -63,7 +63,7 @@ Dependencies and the `edgesnn` package are managed with [uv](https://docs.astral
 
 ```bash
 uv sync                # install dependencies + editable package into .venv
-uv run jupyter lab     # launch notebooks (start with notebooks/01-EDA.ipynb)
+uv run jupyter lab     # launch notebooks (start with notebooks/01-exploratory-data-analysis.ipynb)
 ```
 
 Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_file`.
@@ -92,13 +92,28 @@ Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_
       algorithmic latency, and SOPs-vs-MACs energy under the Horowitz model
 - [x] Experiment notebooks for the three staged comparisons (`03-baselines`,
       `04-initialization-study`, `05-truncation-study`), resumable across restarts
-- [ ] Low-discrepancy initializers currently fill the recurrent matrix from a
-      one-dimensional sequence, which makes it rank-deficient; they are being
-      reworked to the s-dimensional construction before their results are used
+- [x] Low-discrepancy initializers reworked to the s-dimensional construction
+      (one sequence point per row, one prime base per input dimension), with a
+      leaped Halton to avoid the high-dimensional degeneracy and the first two
+      Sobol points skipped; validated against an independent reference
+      implementation by `scripts/check_lds_against_burkardt.py`
+- [x] Stage 1: all five initializers on a frozen reservoir over five seeds each,
+      with the weight-variance control ablated
+- [x] Stages 2 and 3: the truncation sweep across `k`, with operation counts,
+      energy estimates and the accuracy-versus-energy trade-off
+- [x] Gradient clipping applied uniformly to all three models, so that the dense
+      baseline is not the only one exposed to gradient explosion, with the LSTM's
+      learning-rate grid widened to match the search effort the other models
+      receive
+- [x] A single epoch budget shared by every model and stage, set high enough to
+      act as a safety ceiling rather than a training length, so that runs
+      terminate on the early-stopping criterion instead of on the budget; whether
+      the ceiling was reached is recorded for every run
+- [ ] Final run of the full pipeline across all three datasets
 
 ### Reproducing the results
 
-Run the notebooks in order; each writes to `results/` and skips work already done,
+Run the notebooks in order; each writes to `reports/results/` and skips work already done,
 so an interrupted sweep resumes rather than restarting.
 
 ```bash

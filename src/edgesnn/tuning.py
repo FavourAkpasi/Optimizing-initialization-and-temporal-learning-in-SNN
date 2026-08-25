@@ -33,7 +33,8 @@ import pandas as pd
 import torch
 from tqdm.auto import tqdm
 
-from edgesnn.training import SELECTION_FOLDS, cross_validate
+from edgesnn.training import (MAX_EPOCHS, MIN_EPOCHS, PATIENCE, SELECTION_FOLDS,
+                              cross_validate)
 
 __all__ = ["BATCH_SIZES", "DEFAULT_GRIDS", "DEFAULT_STAGES", "expand_grid",
            "grid_search", "staged_search"]
@@ -79,8 +80,25 @@ DEFAULT_GRIDS = {
         "leak_rate": [0.8, 0.9, 0.95],
         "threshold": [0.5, 1.0],
     },
+    # The LSTM has exactly ONE tunable parameter, so its grid is deliberately the
+    # densest of the three: ten values at roughly 2.5 points per decade across
+    # three decades, against the four values each spiking model gets on its lr
+    # axis. The reasoning is search-budget parity. The LSM searches 24
+    # configurations and the SNN 16; giving the LSTM only 4 would mean the
+    # baseline received a quarter of the tuning effort of the model it exists to
+    # challenge, and "the baseline was undertrained" is the first objection to a
+    # favourable efficiency result.
+    #
+    # The range is extended DOWNWARD to 1e-5 and upward to 1e-2 because the
+    # original [1e-4, 3e-3] window was bounded by failure at both ends on Wafer:
+    # 1e-4 collapsed to the all-majority solution (0.485 Macro-F1, best epoch
+    # 1.8) while 3e-3 was unstable. A window whose every interior point is a
+    # compromise between not-learning and diverging is too narrow to have found
+    # an optimum. With gradient clipping in place (see GRAD_CLIP_NORM) the upper
+    # end becomes usable, so the grid is widened in both directions rather than
+    # merely shifted.
     "lstm": {
-        "lr": [1e-4, 3e-4, 1e-3, 3e-3],
+        "lr": [1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2],
     },
 }
 
@@ -125,9 +143,9 @@ def expand_grid(grid):
     return [dict(zip(keys, values)) for values in itertools.product(*(grid[k] for k in keys))]
 
 
-def grid_search(model_factory, train_dataset, grid, *, max_epochs=40, min_epochs=10,
-                patience=8, n_splits=None, seed=0, device="auto", progress=True,
-                desc=None, train_kwargs=None):
+def grid_search(model_factory, train_dataset, grid, *, max_epochs=MAX_EPOCHS,
+                min_epochs=MIN_EPOCHS, patience=PATIENCE, n_splits=None, seed=0,
+                device="auto", progress=True, desc=None, train_kwargs=None):
     """Exhaustively score every configuration in `grid`, best first.
 
     Exhaustive rather than staged: measured head-to-head on ECG5000, the staged
@@ -185,6 +203,12 @@ def grid_search(model_factory, train_dataset, grid, *, max_epochs=40, min_epochs
             "val_macro_f1": score["mean"],
             "val_macro_f1_std": score["std"],
             "mean_best_epoch": score["mean_best_epoch"],
+            # False means the epoch ceiling stopped this configuration rather
+            # than the patience rule -- i.e. it was still improving when the
+            # budget ran out, and its score is a lower bound on what it would
+            # have reached. A search containing such a row is partly ranking
+            # configurations by speed of convergence rather than by quality.
+            "stopped_early": score["all_stopped_early"],
             "n_splits": n_splits,
         })
 

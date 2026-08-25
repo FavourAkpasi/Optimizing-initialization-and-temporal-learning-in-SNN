@@ -20,9 +20,9 @@ import pandas as pd
 import torch
 
 from edgesnn.evaluation_metrics import evaluate_efficiency
-from edgesnn.initializers import generate_sparse_mask, initialize_reservoir, is_deterministic
+from edgesnn.initializers import generate_sparse_mask, initialize_reservoir
 from edgesnn.models import LiquidStateMachine, LSTMBaseline, TruncatedSpikingReservoir
-from edgesnn.training import train_model
+from edgesnn.training import MAX_EPOCHS, MIN_EPOCHS, PATIENCE, train_model
 from edgesnn.tuning import BATCH_SIZES
 
 __all__ = [
@@ -44,7 +44,7 @@ __all__ = [
     "load_config",
 ]
 
-RESULTS_DIR = "../results"
+RESULTS_DIR = "../reports/results"
 
 # The five initializers of the study, Gaussian first because it is the baseline
 # every other method is measured against.
@@ -96,15 +96,30 @@ def build_model(kind, *, num_classes, k, init_method="gaussian", seed=0,
 
 
 def seeds_for(init_method, n_seeds=5):
-    """Seeds to run for an initializer.
+    """Seeds to run for an initializer — the same count for every method.
 
-    Sobol and Halton are deterministic constructions: the n-th point is a fixed
-    function of n, so repeating them would produce bit-identical weights and a
-    standard deviation of exactly zero. Running them once and reporting no error
-    bar is the honest treatment; five identical runs would manufacture the
-    appearance of a replication that never happened.
+    This function previously returned a single seed for Sobol and Halton, on the
+    grounds that a deterministic sequence yields bit-identical weights and hence
+    zero variance. That reasoning was wrong in two ways, and it produced
+    misleading results before it was caught (2026-08-18).
+
+    First, `is_deterministic` describes the SEQUENCE, not the initialized model.
+    The connectivity mask is drawn from the seed, so at any p_c < 1 two seeds
+    select different subsets of synapses and W_res differs — verified directly.
+    Only the dense draw is seed-invariant, and no experiment here uses one.
+
+    Second, the seed is passed on to the trainer, where it also determines the
+    stratified validation split, the batch order and the readout initialization.
+    Even with identical weights the runs would diverge.
+
+    Measured consequence on Wafer: Sobol over five seeds spans 0.794 to 0.917
+    Macro-F1 (sd 0.055), and seed 0 alone happens to be the worst of them. Read
+    as a single point it understated Sobol by roughly 0.06.
+
+    `is_deterministic` is retained because the property it names is real and is
+    reported in its own right; it simply does not license running once.
     """
-    return [0] if is_deterministic(init_method) else list(range(n_seeds))
+    return list(range(n_seeds))
 
 
 def k_values(seq_len, fractions=FRACTIONS):
@@ -174,7 +189,8 @@ def _already_done(existing, condition):
 
 
 def run_condition(kind, train_ds, test_ds, *, k, init_method="gaussian", seed=0,
-                  config=None, max_epochs=80, min_epochs=15, patience=12,
+                  config=None, max_epochs=MAX_EPOCHS, min_epochs=MIN_EPOCHS,
+                  patience=PATIENCE,
                   device="auto", progress=False, **build_kwargs):
     """Train one model on one condition and evaluate it on the test split.
 

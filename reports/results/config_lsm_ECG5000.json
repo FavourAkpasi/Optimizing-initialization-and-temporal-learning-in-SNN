@@ -1,0 +1,5 @@
+{
+  "leak_rate": 0.9,
+  "threshold": 0.5,
+  "lr": 0.001
+}

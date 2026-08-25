@@ -1,0 +1,6 @@
+{
+  "leak_rate": 0.9,
+  "threshold": 0.5,
+  "surrogate": "triangular",
+  "lr": 0.003
+}

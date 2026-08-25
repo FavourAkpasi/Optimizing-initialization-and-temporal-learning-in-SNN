@@ -39,6 +39,10 @@ from tqdm.auto import tqdm
 
 __all__ = [
     "SELECTION_FOLDS",
+    "GRAD_CLIP_NORM",
+    "MAX_EPOCHS",
+    "MIN_EPOCHS",
+    "PATIENCE",
     "resolve_device",
     "class_weights",
     "stratified_split",
@@ -65,6 +69,65 @@ SELECTION_FOLDS = {
     "Wafer": 5,
     "InsectSound": 1,
 }
+
+# Maximum global gradient norm, applied to every model before every step.
+#
+# Added 2026-08-20 after the LSTM baseline was found to be failing on Wafer for
+# optimization reasons rather than capability ones. Per seed, at k = 91 of 152,
+# ALL FIVE seeds landed between 0.601 and 0.685 Macro-F1, while the same model at
+# k = 61 reached 0.966 -- a baseline that does worse on more of the sequence is
+# measuring a broken fit, not a limitation. Notebook 03 had already shown the
+# symptom: every LSTM learning rate on Wafer scored between 0.485 and 0.680 with
+# a fold standard deviation as high as 0.165.
+#
+# The important point is one of FAIRNESS, not of tuning. Running all three models
+# through one trainer with no clipping sounds neutral and is not: the surrogate
+# gradient bounds the spiking models' gradient by construction (each surrogate
+# returns at most 1, beta/2, 1 or beta/4 at threshold), whereas an LSTM
+# backpropagating through 152 timesteps has no such bound. Omitting clipping
+# therefore penalises exactly the baseline the thesis is measured against.
+# Clipping is standard practice for BPTT (Pascanu, Mikolov and Bengio, 2013).
+#
+# 1.0 is the conventional default. It is deliberately NOT tuned: it is a matched
+# constant shared by every model and condition, so it confounds nothing, and
+# tuning it per model would reintroduce the asymmetry it exists to remove.
+GRAD_CLIP_NORM = 1.0
+
+# The epoch budget, shared by every model, dataset and experimental stage.
+#
+# `MAX_EPOCHS` is a SAFETY CEILING, not a training length. It is set high enough
+# that no run is expected to reach it, so that training always terminates on the
+# early-stopping criterion below and never on the budget. That distinction
+# matters: a ceiling that binds is a hyperparameter chosen by accident, and it
+# binds hardest on precisely the configuration that is still improving -- which
+# is the one that least deserves to be cut off. Under the previous ceiling of 80
+# the InsectSound LSM was still improving when it ran out of epochs, so the
+# search there was partly ranking configurations by how quickly they converged
+# rather than by how well.
+#
+# Raising it is close to free, because patience does the stopping. On ECG5000 and
+# Wafer the LSM search peaked at a mean best epoch of 18.6 and 25.0, with no
+# configuration above 52.4 out of 80; those runs stopped because they had stopped
+# improving, so a higher ceiling changes their result not at all and costs only
+# the epochs a still-improving run actually uses. Nor can a larger budget inflate
+# the reported figure: `train_model` restores the best-validation weights, so
+# extra epochs can only find a better peak or leave the existing one alone.
+#
+# ONE budget for all three models, for the same reason gradient clipping is one
+# constant: a budget that binds on one architecture and not another silently
+# penalises whichever model converges more slowly. Note the side effect, which is
+# correct behaviour rather than a flaw -- a longer budget favours smaller
+# learning rates, which need more epochs to arrive at the same place, so the
+# selected learning rate may fall relative to a search run under a tight ceiling.
+#
+# `PATIENCE` is the number of consecutive epochs allowed to pass without a new
+# best validation Macro-F1 before the run is abandoned; any new best resets the
+# count to zero. `MIN_EPOCHS` is a floor that outranks it, because on Wafer a
+# model can sit at the all-majority solution with a falling loss and a flat
+# Macro-F1 for several epochs, which patience alone would misread as convergence.
+MAX_EPOCHS = 200
+MIN_EPOCHS = 15
+PATIENCE = 12
 
 
 def resolve_device(device="auto"):
@@ -167,14 +230,28 @@ def evaluate_model(model, dataset, batch_size=256, device="auto", indices=None):
     }
 
 
-def train_model(model, train_dataset, *, batch_size=64, lr=1e-3, max_epochs=60,
-                min_epochs=10, patience=10, val_fraction=0.2, weighted_loss=True,
-                device="auto", seed=0, progress=True, desc=None, split=None):
+def train_model(model, train_dataset, *, batch_size=64, lr=1e-3,
+                max_epochs=MAX_EPOCHS, min_epochs=MIN_EPOCHS, patience=PATIENCE,
+                val_fraction=0.2, weighted_loss=True,
+                device="auto", seed=0, progress=True, desc=None, split=None,
+                grad_clip=GRAD_CLIP_NORM):
     """Fit `model` on `train_dataset`, returning the best-validation weights.
 
     The model is mutated in place and left holding the parameters from its best
     validation epoch, not from its last one -- otherwise a run that peaked and
     then overfitted would be reported at its worst.
+
+    Training stops when `patience` consecutive epochs have passed without a new
+    best validation Macro-F1 (any new best resets that counter), subject to the
+    `min_epochs` floor. `max_epochs` is a safety ceiling that no run is expected
+    to reach; `TrainResult.stopped_early` records whether it was reached, which
+    is what makes the claim "every run terminated on the stopping criterion"
+    checkable rather than assumed.
+
+    `grad_clip` rescales the gradient to that maximum global norm before each
+    optimizer step. See `GRAD_CLIP_NORM`: it is applied identically to all three
+    models, and omitting it does NOT treat them equally, because only the LSTM
+    has an unbounded gradient. Pass `None` to disable.
 
     `split` accepts a precomputed `(train_idx, val_idx)` pair so that every
     configuration in a grid search sees the identical split; comparing
@@ -232,6 +309,8 @@ def train_model(model, train_dataset, *, batch_size=64, lr=1e-3, max_epochs=60,
             logits, _ = model(xb)
             loss = criterion(logits, yb)
             loss.backward()
+            if grad_clip is not None:
+                nn.utils.clip_grad_norm_(trainable, grad_clip)
             optimizer.step()
 
             running_loss += loss.item()
@@ -285,7 +364,12 @@ def cross_validate(model_factory, train_dataset, *, n_splits=5, seed=0,
                    progress=True, desc=None, **fit_kwargs):
     """Stratified k-fold selection score for one configuration.
 
-    Returns `{"mean", "std", "folds", "mean_best_epoch"}`. The mean is the
+    Returns `{"mean", "std", "folds", "mean_best_epoch", "all_stopped_early"}`.
+    The last is False if any fold exhausted the epoch ceiling instead of
+    triggering the patience rule, which is the signal that the budget -- rather
+    than convergence -- decided when that configuration stopped learning.
+
+    The mean is the
     quantity to select on; the standard deviation says whether a difference
     between two configurations is worth believing, which a single split cannot
     tell you at all.
@@ -302,10 +386,11 @@ def cross_validate(model_factory, train_dataset, *, n_splits=5, seed=0,
         result = train_model(model_factory(), train_dataset, seed=seed,
                              progress=progress, desc=desc, **fit_kwargs)
         return {"mean": result.best_val_f1, "std": 0.0,
-                "folds": [result.best_val_f1], "mean_best_epoch": result.best_epoch}
+                "folds": [result.best_val_f1], "mean_best_epoch": result.best_epoch,
+                "all_stopped_early": result.stopped_early}
 
     splitter = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    scores, epochs = [], []
+    scores, epochs, stopped = [], [], []
 
     for fold, (tr_idx, va_idx) in enumerate(splitter.split(np.zeros(len(y)), y), start=1):
         torch.manual_seed(seed)
@@ -314,6 +399,7 @@ def cross_validate(model_factory, train_dataset, *, n_splits=5, seed=0,
                              desc=f"{desc or 'cv'} fold {fold}/{n_splits}", **fit_kwargs)
         scores.append(result.best_val_f1)
         epochs.append(result.best_epoch)
+        stopped.append(result.stopped_early)
 
     scores = np.asarray(scores)
     return {
@@ -321,4 +407,5 @@ def cross_validate(model_factory, train_dataset, *, n_splits=5, seed=0,
         "std": float(scores.std()),
         "folds": scores.tolist(),
         "mean_best_epoch": float(np.mean(epochs)),
+        "all_stopped_early": bool(all(stopped)),
     }

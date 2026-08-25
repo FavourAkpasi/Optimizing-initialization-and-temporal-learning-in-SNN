@@ -52,48 +52,151 @@ def generate_lfsr_weights(shape, seed=0xACE1, scale=1.0):
     return tensor
 
 
+# ---------------------------------------------------------------------------
+# Low-discrepancy sequences
+#
+# A low-discrepancy sequence is a construction in s DIMENSIONS: point i is a
+# vector whose j-th coordinate comes from a different one-dimensional
+# construction (a different prime base for Halton, a different set of direction
+# numbers for Sobol). The whole point is that the resulting POINT SET fills the
+# s-dimensional unit cube more evenly than independent random draws.
+#
+# The weight matrix is therefore filled ROW BY ROW: row i is one s-dimensional
+# point, where s = fan-in. Each neuron's incoming weight vector is a single
+# sample, and the sequence stratifies the fan-in space across neurons.
+#
+# Filling the matrix from a SINGLE one-dimensional sequence read left-to-right
+# instead (the original implementation here) is not merely a weaker version of
+# this: with 65,536 = 2^16 values from a base-2 construction laid out as
+# (256, 256), every row becomes an affine copy of the same pattern and the dense
+# matrix has effective rank 1. The sparse mask hides most of the damage — the
+# masked matrix recovers to rank ~171 against Gaussian's ~203 — but the
+# construction still does not match what the Background chapter describes, so
+# any result attributed to "low-discrepancy initialization" would be measuring
+# something else.
+#
+# Both generators below were cross-checked against John Burkardt's reference
+# implementations (people.sc.fsu.edu/~jburkardt/py_src/{halton,sobol}); see
+# `scripts/check_lds_against_burkardt.py`.
+# ---------------------------------------------------------------------------
+
+# Sobol's point 0 is the origin and its point 1 is the all-0.5 vector. Under the
+# [0,1] -> [-1,1] shift those become an all-(-1) row and an exactly ZERO row: one
+# saturated neuron and one with no recurrent input at all. Both are artefacts of
+# where the sequence starts rather than properties of the sequence, so the first
+# two points are skipped. Skipping only the origin is NOT enough.
+_SOBOL_SKIP = 2
+
+
+def _point_layout(shape):
+    """Split `shape` into (number of points, dimensions per point).
+
+    The last axis is the fan-in, so it becomes the dimension of the sequence and
+    every other axis enumerates points.
+    """
+    dimension = shape[-1] if len(shape) > 1 else 1
+    return math.prod(shape) // dimension, dimension
+
+
 def generate_sobol_weights(shape, scale=1.0):
     """
-    Generates a weight tensor using the Sobol Low-Discrepancy Sequence.
-    Utilizes PyTorch's built-in Quasi-Random sequence engine for maximum uniformity.
+    Weight tensor from an s-dimensional Sobol sequence, one point per row.
+
+    Uses `torch.quasirandom.SobolEngine`, which carries the Joe-Kuo (2008)
+    direction numbers. Burkardt's reference port implements Bratley-Fox
+    (ACM Algorithm 659, 1988) instead: the two agree exactly in dimensions 1-2
+    and diverge from dimension 3 onwards, where the initial direction numbers
+    first become a free choice. Both are valid Sobol sequences and their
+    one-dimensional uniformity is identical; the reference caps at 40 dimensions
+    and so cannot serve as the generator here, only as an oracle.
     """
-    num_elements = math.prod(shape)
+    num_points, dimension = _point_layout(shape)
 
-    # We use a 1D Sobol engine and draw enough numbers to fill the tensor
-    sobol_engine = torch.quasirandom.SobolEngine(dimension=1)
+    engine = torch.quasirandom.SobolEngine(dimension=dimension, scramble=False)
+    points = engine.draw(num_points + _SOBOL_SKIP)[_SOBOL_SKIP:]
 
-    # Draw values in [0, 1]
-    raw_values = sobol_engine.draw(num_elements).squeeze()
-
-    # Shift to [-1, 1] and scale (typically by 1/sqrt(fan_in) like Kaiming/Xavier)
-    scaled_values = (raw_values * 2.0 - 1.0) * scale
-
-    return scaled_values.view(shape)
+    return ((points * 2.0 - 1.0) * scale).to(torch.float32).view(shape)
 
 
-def generate_halton_weights(shape, scale=1.0, base=2):
+def _first_primes(count):
+    """The first `count` primes, as Halton's per-dimension bases."""
+    if count < 1:
+        return []
+    # Overestimate of the count-th prime (n ln n + n ln ln n), then sieve.
+    limit = 16 if count < 6 else int(count * (math.log(count) + math.log(math.log(count)))) + 10
+    while True:
+        sieve = bytearray([1]) * (limit + 1)
+        sieve[0:2] = b"\x00\x00"
+        for p in range(2, int(limit ** 0.5) + 1):
+            if sieve[p]:
+                sieve[p * p::p] = bytearray(len(range(p * p, limit + 1, p)))
+        primes = [i for i, is_prime in enumerate(sieve) if is_prime]
+        if len(primes) >= count:
+            return primes[:count]
+        limit *= 2
+
+
+def _next_prime_above(value):
+    """Smallest prime strictly greater than `value`."""
+    candidate = value + 1
+    while True:
+        if candidate > 1 and all(candidate % d for d in range(2, int(candidate ** 0.5) + 1)):
+            return candidate
+        candidate += 1
+
+
+def _radical_inverse(indices, base):
+    """Radical inverse of each index in `base`, vectorised over the point index.
+
+    Identical arithmetic to the textbook scalar loop (and bit-identical to
+    Burkardt's `halton()`), evaluated for all points at once.
     """
-    Generates a weight tensor using a 1D Halton Sequence.
-    Mathematically constructs a deterministic sequence using radical inverse functions.
+    remaining = indices.clone()
+    result = torch.zeros(len(remaining), dtype=torch.float64)
+    fraction = 1.0
+    while bool((remaining > 0).any()):
+        fraction /= base
+        result += fraction * (remaining % base).to(torch.float64)
+        remaining = remaining // base
+    return result
+
+
+def generate_halton_weights(shape, scale=1.0, leap=None):
     """
-    num_elements = math.prod(shape)
-    values = []
+    Weight tensor from an s-dimensional Halton sequence, one point per row.
 
-    for i in range(1, num_elements + 1):
-        f = 1.0
-        r = 0.0
-        index = i
-        while index > 0:
-            f = f / base
-            r = r + f * (index % base)
-            index = index // base
+    Dimension j uses the j-th prime as its base, as in Burkardt's reference
+    `halton(i, m)` — which this reproduces exactly.
 
-        # r is in [0, 1]. Shift to [-1, 1]
-        normalized = r * 2.0 - 1.0
-        values.append(normalized * scale)
+    `leap` addresses the well-known high-dimensional Halton degeneracy. With 256
+    dimensions the largest base is the 256th prime, 1619, and the radical inverse
+    of i < 256 in base 1619 is simply i/1619 — a linear ramp. Enough dimensions
+    behave that way that the dense point set has effective rank ~26 rather than
+    the ~200 of a Gaussian draw. Taking every `leap`-th point pushes the indices
+    past the first digit of the large bases and repairs it (dense rank ~189,
+    masked ~204, on par with Gaussian).
 
-    tensor = torch.tensor(values, dtype=torch.float32).view(shape)
-    return tensor
+    Following Kocis and Whiten (1997), the leap must be a prime that is NOT one
+    of the bases in use; the default is therefore the smallest prime above the
+    largest base, which satisfies that by construction at any dimension rather
+    than hard-coding a constant that happens to work at 256.
+
+    Leaping is preferred over scrambling because it keeps the sequence
+    deterministic: Sobol and Halton then retain exactly zero seed-to-seed
+    variance (see `DETERMINISTIC_METHODS`), which is a reported property here,
+    whereas scrambling would introduce a seed and change that claim.
+    """
+    num_points, dimension = _point_layout(shape)
+
+    bases = _first_primes(dimension)
+    if leap is None:
+        leap = _next_prime_above(bases[-1])
+
+    indices = torch.arange(1, num_points + 1, dtype=torch.long) * leap
+    columns = [_radical_inverse(indices, base) for base in bases]
+    points = torch.stack(columns, dim=1)
+
+    return ((points * 2.0 - 1.0) * scale).to(torch.float32).view(shape)
 
 
 # Methods whose raw output is uniform on [-1, 1]. A uniform variate on [-1, 1]
