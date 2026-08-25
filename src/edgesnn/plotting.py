@@ -384,3 +384,77 @@ def plot_prefix_curve(curves, save_path=None, show=True, x="fraction",
         plt.tight_layout()
         _finish(fig, save_path, show)
     return ax
+
+
+def plot_initializer_effect(frames, baseline="gaussian", value="macro_f1",
+                            group="init_method", save_path=None, show=True,
+                            title=None, ylabel=None, order=None, sharex=False):
+    """Per-initializer performance relative to a baseline, with seed spread.
+
+    `frames` is one DataFrame of PER-SEED result rows or a `{dataset: DataFrame}`
+    mapping, in the shape written by `experiments.run_grid` — one row per
+    (initializer, seed). The aggregation happens here rather than in the caller
+    so that the error bar and the point can never come from different groupings.
+
+    Each initializer is drawn as its mean advantage over `baseline` with an error
+    bar of ±1 standard deviation ACROSS SEEDS, and the baseline itself sits on a
+    reference line at zero. That layout is the point of the figure. The
+    differences between cheap generators in this study are smaller than the
+    spread across seeds, and a table of five numbers invites a reader to rank
+    them regardless; drawn with error bars, the overlap is visible before any
+    ordering is. A method whose interval crosses zero is not distinguishable
+    from the baseline, and two methods whose intervals overlap are not
+    distinguishable from each other.
+
+    The spread is across seeds, which for a sparse reservoir is the meaningful
+    replicate even for the deterministic sequences: Sobol and Halton produce a
+    bit-identical dense draw at every seed, but the connectivity mask, the
+    validation split, the batch order and the readout are all seeded, so their
+    realised networks differ and their spread is real rather than an artefact.
+
+    `sharex` puts every panel on one horizontal scale. Left independent (the
+    default) each panel resolves its own differences, but the panels are then
+    NOT comparable by eye: a deficit of 0.15 Macro-F1 and one of 0.04 occupy the
+    same width. Shared, the panels are honestly comparable and the datasets with
+    small effects correctly look small. Choose per figure and say which in the
+    caption.
+    """
+    if isinstance(frames, pd.DataFrame):
+        frames = {"": frames}
+
+    panels = len(frames)
+    fig, axes = plt.subplots(1, panels, figsize=(4.6 * panels, 4.6),
+                             squeeze=False, sharex=sharex)
+
+    for ax, (name, frame) in zip(axes[0], frames.items()):
+        stats = (frame.groupby(group)[value]
+                 .agg(mean="mean", sd="std", n="count")
+                 .fillna({"sd": 0.0}))
+        if baseline not in stats.index:
+            raise ValueError(f"baseline {baseline!r} absent from column {group!r}")
+
+        reference = stats.loc[baseline, "mean"]
+        # The baseline is the reference line, so plotting it as a point too would
+        # place a marker at exactly zero that means something different from the
+        # others -- it is a definition, not a measurement.
+        methods = [m for m in (order or stats.index) if m != baseline]
+        stats = stats.loc[methods]
+
+        y = np.arange(len(methods))
+        ax.axvline(0.0, color="0.35", linewidth=1.4, zorder=1)
+        ax.errorbar(stats["mean"] - reference, y, xerr=stats["sd"], fmt="o",
+                    color=sns.color_palette("viridis", 5)[1], markersize=7,
+                    capsize=4, linewidth=1.6, zorder=3)
+        ax.set_yticks(y)
+        ax.set_yticklabels(methods)
+        ax.invert_yaxis()
+        ax.set_title(f"{name}\n{baseline} = {reference:.4f}" if name
+                     else f"{baseline} = {reference:.4f}", fontsize=12)
+        ax.set_xlabel(ylabel or f"Δ {value} vs. {baseline}")
+        ax.grid(axis="y", visible=False)
+
+    if title:
+        fig.suptitle(title, fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    _finish(fig, save_path, show)
+    return fig

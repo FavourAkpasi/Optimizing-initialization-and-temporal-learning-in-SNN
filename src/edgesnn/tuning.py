@@ -89,16 +89,28 @@ DEFAULT_GRIDS = {
     # challenge, and "the baseline was undertrained" is the first objection to a
     # favourable efficiency result.
     #
-    # The range is extended DOWNWARD to 1e-5 and upward to 1e-2 because the
-    # original [1e-4, 3e-3] window was bounded by failure at both ends on Wafer:
-    # 1e-4 collapsed to the all-majority solution (0.485 Macro-F1, best epoch
-    # 1.8) while 3e-3 was unstable. A window whose every interior point is a
-    # compromise between not-learning and diverging is too narrow to have found
-    # an optimum. With gradient clipping in place (see GRAD_CLIP_NORM) the upper
-    # end becomes usable, so the grid is widened in both directions rather than
-    # merely shifted.
+    # The range was first extended downward to 1e-5 and upward to 1e-2 because
+    # the original [1e-4, 3e-3] window was bounded by failure at both ends on
+    # Wafer: 1e-4 collapsed to the all-majority solution (0.485 Macro-F1, best
+    # epoch 1.8) while 3e-3 was unstable. A window whose every interior point is
+    # a compromise between not-learning and diverging is too narrow to have
+    # contained an optimum.
+    #
+    # Extended again to 5e-2 (2026-08-25), UPWARD ONLY. The requirement is that
+    # the selected value be INTERIOR to the grid, since a winner sitting on the
+    # boundary leaves it unknown whether the optimum lies outside. After the full
+    # re-run, ECG5000 selected 2e-3 and Wafer 5e-4, both interior with worse
+    # neighbours on either side; only InsectSound selected the largest value in
+    # the grid.
+    #
+    # The lower end is deliberately NOT extended. It is not truncating the
+    # search: at 1e-5 on Wafer the LSTM scores 0.4745 with a mean best epoch of
+    # 1.0, which is a clean "does not learn" failure rather than a boundary that
+    # might be hiding something. Extending below it would buy nothing and would
+    # cost search time on all three datasets to re-confirm a known result.
     "lstm": {
-        "lr": [1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2],
+        "lr": [1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4,
+               1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2],
     },
 }
 

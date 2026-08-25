@@ -39,7 +39,7 @@ Three staged comparisons:
 ```
 src/edgesnn/            installable package (editable via `uv sync`)
   data_utils.py         UCR parsing/loading (format-agnostic .txt/.tsv/.ts)
-  plotting.py           EDA plots (operate on DataFrames)
+  plotting.py           EDA and results plots (operate on DataFrames)
   initializers.py       cheap PRNG/LDS weight initializers
   temporal_analysis.py  per-timestep separability + prefix-classifier curves
   training.py           shared truncated-BPTT trainer (weighted loss, early stop)
@@ -109,6 +109,13 @@ Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_
       act as a safety ceiling rather than a training length, so that runs
       terminate on the early-stopping criterion instead of on the budget; whether
       the ceiling was reached is recorded for every run
+- [x] Initialization figure: each generator's performance relative to the
+      Gaussian baseline with the spread across seeds shown as an error bar, so
+      that a difference smaller than the seed-to-seed variation is visible as
+      such rather than presented as a ranking
+- [x] Truncation sweep extended to every initializer on both the trained and the
+      frozen reservoir, so that the two differ in exactly one respect at each
+      generator and no single generator has to be nominated in advance
 - [ ] Final run of the full pipeline across all three datasets
 
 ### Reproducing the results
