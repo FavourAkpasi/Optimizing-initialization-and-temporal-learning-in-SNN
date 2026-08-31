@@ -4,8 +4,10 @@ Master thesis · **Favour Akpasi** · Institute of Signal Processing (ISP), JKU 
 
 ## Overview
 
-This project builds a **co-optimized Spiking Recurrent Neural Network (SNN)** for
-edge hardware, aimed at tackling two computational bottlenecks at once:
+This project builds a **Trained Liquid State Machine (TLSM)** — a spiking
+reservoir that keeps the Liquid State Machine architecture but also adapts its
+recurrent weights — co-optimized for edge hardware and aimed at tackling two
+computational bottlenecks at once:
 
 1. **Initialization cost.** Standard networks draw weights from a Gaussian
    distribution (Box–Muller: logs, square roots) — expensive on tiny
