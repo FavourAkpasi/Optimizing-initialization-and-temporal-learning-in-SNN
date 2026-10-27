@@ -25,3 +25,11 @@ out/
 
 claude/
 CLAUDE.md
+
+# Downloaded third-party reference code (fetched by check_lds_against_burkardt.py on first run)
+scripts/_burkardt_reference/
+
+# Local documents that do not belong in the public repo
+reports/Thesis_Guidelines.pdf
+reports/presentation.pptx
+reports/*.pptx

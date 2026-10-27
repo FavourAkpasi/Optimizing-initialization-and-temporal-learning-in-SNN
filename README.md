@@ -118,7 +118,14 @@ Modules are then importable anywhere: `from edgesnn.data_utils import parse_ucr_
 - [x] Truncation sweep extended to every initializer on both the trained and the
       frozen reservoir, so that the two differ in exactly one respect at each
       generator and no single generator has to be nominated in advance
-- [ ] Final run of the full pipeline across all three datasets
+- [x] Final run of the full pipeline across all three datasets; the committed
+      `reports/results/` and `reports/figures/` are the outputs of that run and
+      are the raw material for the thesis tables and figures
+- [x] The proposed model is named the **TLSM** (Trained Liquid State Machine) in
+      all figures and documents; its rows appear in the result CSVs and config
+      files under the internal key `snn`, which predates the name and is kept
+      stable so completed runs are recognised and resumed rather than re-run
+      (the LSTM analogously records the initializer `default`)
 
 ### Reproducing the results
 
